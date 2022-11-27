@@ -13,11 +13,13 @@
     "react-dom": "^18.2.0",
     "react-feather": "^2.0.10",
     "react-scripts": "5.0.1",
-    "react-use-websocket": "^4.2.0",
+    "react-toastify": "^9.1.1",
+    "socket.io": "^4.5.3",
+    "socket.io-client": "^4.5.3",
     "web-vitals": "^2.1.4"
   },
   "scripts": {
-    "start": "react-scripts start --host=0.0.0.0",
+    "start": "PORT=4000 react-scripts start --host=0.0.0.0",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"

@@ -1,0 +1,7 @@
+[ ][improvement] Add loading state/indicator to settings page
+[ ][improvement] Consolidate ui state, make components purely functional
+[ ][improvement] Convert string consts to enumerable objects
+[ ][feature] Tshirt: session CRUD
+[ ][feature] Decade drill, state machine logic
+[ ][feature] Randomized practice, generate based on preferences
+[ ][infrastructure] Deploy ui + backend to same host

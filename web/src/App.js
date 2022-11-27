@@ -1,13 +1,27 @@
-import React, { useEffect, useState, useCallback } from "react";
-import { Container, Row, Col, Nav } from "react-bootstrap";
+import React, { useEffect, useState } from "react";
+import { Container, Row, Col } from "react-bootstrap";
 import { Button, Badge, ProgressBar } from "react-bootstrap";
 import { ArrowLeft, Save, Info } from "react-feather";
-import useWebSocket, { ReadyState } from "react-use-websocket";
+import { ToastContainer, toast } from "react-toastify";
+import io from "socket.io-client";
 
-// mock callable from dev console
-window.putt = (value = null) => {
-  const s = value !== null ? value : Math.random() * 3.14;
-  return `Sending fake signal: ${s}`;
+// import circleLoadingGif from "./static/circle-loading-gif.gif";
+
+// const UI_ROOT = `http://192.168.1.114:4000`;
+const API_ROOT = `http://192.168.1.16:8000/api`;
+const WS_ROOT = `ws://192.168.1.16:8000`;
+
+const socket = io(WS_ROOT);
+
+const convertRawMeasurement = (raw) => {
+  let feet, inches;
+  feet = Math.floor(raw);
+  inches = Math.round((raw - feet) * 12);
+  if (inches === 12) {
+    feet += 1;
+    inches = 0;
+  }
+  return { raw, feet, inches };
 };
 
 const NavPanel = ({ title, left, right, ...props }) => {
@@ -20,22 +34,26 @@ const NavPanel = ({ title, left, right, ...props }) => {
   );
 };
 
-const StatusPanel = ({ value = 0, onReset = () => {}, ...props }) => {
-  // 0: init, 1: connected, 2: reading
-  const [status, setStatus] = useState(value);
+const StatusPanel = ({
+  isConnected,
+  isMeasuring,
+  onReset = () => {},
+  ...props
+}) => {
+  // isConnected: true || false
+  // isMeasuring: true || false
 
   const handleReset = () => {
+    // TODO: only allow reset if both connected and measuring
     console.log(`handling reset`);
     onReset();
   };
 
-  const table = {
-    0: { bg: "dark", text: "⚪️ Not Connected" },
-    1: { bg: "success", text: "🟢 Sensor Ready" },
-    2: { bg: "warning", text: "🟡 Sensor Capturing" },
-  };
-
-  const { bg, text } = table[status];
+  const { bg, text } = !isConnected
+    ? { bg: `dark`, text: `Not Connected` }
+    : !isMeasuring
+    ? { bg: `success`, text: `Connected` }
+    : { bg: `warning`, text: `Measuring` };
 
   return (
     <Container className="mt-2 text-center">
@@ -50,19 +68,24 @@ const StatusPanel = ({ value = 0, onReset = () => {}, ...props }) => {
   );
 };
 
-const DisplayPanel = (props) => {
-  const { raw, feet, inches } = props;
+const DisplayPanel = ({ raw, feet, inches }) => {
   return (
     <Container className="h-100">
       <Row className="justify-content-center h-100">
-        <Col className="text-center">
+        <Col
+          className="text-center"
+          onClick={() => {
+            console.log(`clear`);
+          }}
+        >
+          {/* TODO: toggle decimal & feet/inches */}
           <div style={{ marginTop: "50%" }}>
             {!feet && !inches && <span>Waiting for data...</span>}
             <span style={{ fontSize: "8rem" }}>
-              {feet === undefined ? `` : feet === 0 ? `_` : `${feet}'`}
+              {feet === undefined ? `` : `${feet}'`}
             </span>
             <span style={{ fontSize: "7rem" }}>
-              {inches === undefined ? `` : feet === 0 ? `_` : `${inches}"`}
+              {inches === undefined ? `` : `${inches}"`}
             </span>
           </div>
         </Col>
@@ -146,7 +169,7 @@ const App = (props) => {
   const {
     defaultView = `home`,
     defaultSettings = {
-      speed: 10,
+      stimp: 10,
       slope: 0,
       surface: 9,
       offset: 1.5,
@@ -158,28 +181,73 @@ const App = (props) => {
   const [thisView, setThisView] = useState(defaultView);
   const [thisSettings, setThisSettings] = useState(defaultSettings);
   const [thisStatus, setThisStatus] = useState(defaultStatus);
+  const [thisMeasurement, setThisMeasurement] = useState({});
 
-  // begin websockets
-  const [socketUrl, setSocketUrl] = useState(`ws://echo.websocket.events/.ws`);
-  const [messageHistory, setMessageHistory] = useState([]);
-  const { sendMessage, lastMessage, readyState } = useWebSocket(socketUrl);
-  const handleClickSendMessage = useCallback(() => sendMessage(`hello`), []);
-  const connectionStatus = {
-    [ReadyState.CONNECTING]: "Connecting",
-    [ReadyState.OPEN]: "Open",
-    [ReadyState.CLOSING]: "Closing",
-    [ReadyState.CLOSED]: "Closed",
-    [ReadyState.UNINSTANTIATED]: "Uninstantiated",
-  }[readyState];
-
-  const handleClickChangeSocketUrl = useCallback(() => {}, []);
+  // begin websocket
+  const [isConnected, setIsConnected] = useState(socket.connected);
+  const [lastPong, setLastPong] = useState(null);
 
   useEffect(() => {
-    if (lastMessage !== null) {
-      setMessageHistory((prev) => prev.concat(lastMessage));
-    }
-  }, [lastMessage, setMessageHistory]);
-  // end websockets
+    socket.on("connect", () => {
+      console.debug(`socketio: connect`);
+      setIsConnected(true);
+    });
+
+    socket.on("disconnect", () => {
+      console.debug(`socketio: disconnect`);
+      setIsConnected(false);
+    });
+
+    socket.on("pong", () => {
+      console.debug(`socketio: pong`);
+      setLastPong(new Date().toISOString());
+    });
+
+    socket.on(`measurement`, (json) => {
+      console.log(`socketio: measurement`);
+      const payload = JSON.parse(json);
+      setThisMeasurement(payload);
+    });
+
+    return () => {
+      socket.off("connect");
+      socket.off("disconnect");
+      socket.off("pong");
+      socket.off(`measurement`);
+    };
+  }, []);
+
+  const sendPing = () => {
+    socket.emit("ping");
+  };
+
+  const sendReset = () => {
+    socket.emit(`reset`);
+  };
+
+  // mock callable from dev console
+  window.putt = (value = null) => {
+    const raw = value !== null ? value : Math.random() * 3.14;
+    const payload = convertRawMeasurement(raw);
+    console.log(payload);
+    setThisMeasurement(payload);
+    return payload;
+  };
+
+  // keep socket refreshed for more responsive display
+  useEffect(() => {
+    const interval = setInterval(() => {
+      sendPing();
+    }, 500);
+    return () => {
+      clearInterval(interval);
+    };
+  }, []);
+
+  const handleMock = () => {
+    console.log(`mock reading`);
+  };
+  // end websocket
 
   useEffect(() => {
     const value = getLocalStorage(`view`, defaultView);
@@ -214,7 +282,7 @@ const App = (props) => {
   };
 
   const handleLoadSettings = (defaults) => {
-    const url = `http://${window.location.hostname}:8000/api/settings`;
+    const url = `${API_ROOT}/settings`;
     console.log(`fetching url: ${url}`);
     fetch(url)
       .then((response) => response.json())
@@ -228,7 +296,7 @@ const App = (props) => {
 
   const handleSaveSettings = (payload) => {
     console.log(payload);
-    const url = `http://${window.location.hostname}:8000/api/settings`;
+    const url = `${API_ROOT}/settings`;
     console.log(`posting url: ${url}`);
     fetch(url, {
       method: "POST",
@@ -238,10 +306,18 @@ const App = (props) => {
       body: JSON.stringify(payload),
     })
       .then((response) => response.json())
-      .then((json) => setThisSettings(json))
+      .then((json) => {
+        notify(`Saved settings`);
+        setThisSettings(json);
+      })
       .catch((error) => {
+        notify(error);
         console.error(error);
       });
+  };
+
+  const notify = (text, type = `info`) => {
+    return toast[type](text);
   };
 
   const HomePage = ({ ...props }) => {
@@ -285,6 +361,17 @@ const App = (props) => {
             size="lg"
             className="glow"
             onClick={() => {
+              navigate(`drill`);
+            }}
+            disabled
+          >
+            My Data
+          </Button>
+          <Button
+            variant="secondary"
+            size="lg"
+            className="glow"
+            onClick={() => {
               navigate(`settings`);
             }}
           >
@@ -302,10 +389,15 @@ const App = (props) => {
       <Container className="h-100">
         <NavPanel
           title={title}
-          left={<ArrowLeft onClick={() => navigate(`home`)} />}
+          left={
+            <ArrowLeft
+              style={{ cursor: `pointer` }}
+              onClick={() => navigate(`home`)}
+            />
+          }
         />
-        <StatusPanel value={status} />
-        <DisplayPanel />
+        {/* <StatusPanel value={status} /> */}
+        <DisplayPanel {...thisMeasurement} />
       </Container>
     );
   };
@@ -324,8 +416,13 @@ const App = (props) => {
       <Container>
         <NavPanel
           title={title}
-          left={<ArrowLeft onClick={() => navigate(`home`)} />}
-          right={<Save onClick={handleSave} />}
+          left={
+            <ArrowLeft
+              style={{ cursor: `pointer` }}
+              onClick={() => navigate(`home`)}
+            />
+          }
+          right={<Save style={{ cursor: `pointer` }} onClick={handleSave} />}
         />
         <hr />
         <RangePanel
@@ -335,8 +432,8 @@ const App = (props) => {
           min={8}
           max={12}
           step={1}
-          defaultValue={state.speed}
-          onChange={(val) => setState({ ...state, speed: val })}
+          defaultValue={state.stimp}
+          onChange={(val) => setState({ ...state, stimp: val })}
         />
         <hr />
         <RangePanel
@@ -407,32 +504,27 @@ const App = (props) => {
         <Col
           className="view"
           xs={12} // mobile
-          sm={10}
-          md={8}
+          sm={12}
+          md={12} // tablet
           lg={6}
-          xl={4}
+          xl={6} // desktop
           style={{
             minHeight: "100%",
           }}
         >
-          <div>
-            <button onClick={handleClickChangeSocketUrl}>
-              Click Me to change Socket Url
-            </button>
-            <button
-              onClick={handleClickSendMessage}
-              disabled={readyState !== ReadyState.OPEN}
-            >
-              Click Me to send 'Hello'
-            </button>
-            <span>The WebSocket is currently {connectionStatus}</span>
-            {lastMessage ? <span>Last message: {lastMessage.data}</span> : null}
-            <ul>
-              {messageHistory.map((message, idx) => (
-                <span key={idx}>{message ? message.data : null}</span>
-              ))}
-            </ul>
-          </div>
+          <ToastContainer
+            position="top-right"
+            autoClose={3000}
+            hideProgressBar={false}
+            newestOnTop={true}
+            closeOnClick
+            rtl={false}
+            pauseOnFocusLoss
+            draggable
+            pauseOnHover
+            theme="dark"
+          />
+          <StatusPanel isConnected={isConnected} onReset={sendReset} />
           {thisView === `home` && (
             <HomePage
               title={`Home`}
@@ -444,7 +536,7 @@ const App = (props) => {
             <PracticePage
               title={`Practice`}
               navigate={handleChangeView}
-              status={thisStatus}
+              // status={thisStatus}
             />
           )}
           {thisView === `settings` && (
