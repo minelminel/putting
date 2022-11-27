@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Container, Row, Col } from "react-bootstrap";
-import { Button, Badge, ProgressBar } from "react-bootstrap";
+import { Button, Badge, ProgressBar, Spinner } from "react-bootstrap";
 import { ArrowLeft, Save, Info } from "react-feather";
 import { ToastContainer, toast } from "react-toastify";
 import io from "socket.io-client";
@@ -13,17 +13,25 @@ const WS_ROOT = `ws://192.168.1.16:8000`;
 
 const socket = io(WS_ROOT);
 
-const convertRawMeasurement = (raw) => {
-  let feet, inches;
-  feet = Math.floor(raw);
-  inches = Math.round((raw - feet) * 12);
-  if (inches === 12) {
-    feet += 1;
-    inches = 0;
-  }
-  return { raw, feet, inches };
+const VIEWS = {
+  HOME: `HOME`,
+  PRACTICE: `PRACTICE`,
+  SETTINGS: `SETTINGS`,
 };
 
+/** utils */
+const convertRawMeasurement = (raw) => {
+  let feet, inch;
+  feet = Math.floor(raw);
+  inch = Math.round((raw - feet) * 12);
+  if (inch === 12) {
+    feet += 1;
+    inch = 0;
+  }
+  return { raw, feet, inch };
+};
+
+/** components */
 const NavPanel = ({ title, left, right, ...props }) => {
   return (
     <Row className="mt-3 justify-content-between">
@@ -68,7 +76,7 @@ const StatusPanel = ({
   );
 };
 
-const DisplayPanel = ({ raw, feet, inches }) => {
+const DisplayPanel = ({ raw, feet, inch }) => {
   return (
     <Container className="h-100">
       <Row className="justify-content-center h-100">
@@ -78,14 +86,14 @@ const DisplayPanel = ({ raw, feet, inches }) => {
             console.log(`clear`);
           }}
         >
-          {/* TODO: toggle decimal & feet/inches */}
+          {/* TODO: toggle decimal & feet/inch */}
           <div style={{ marginTop: "50%" }}>
-            {!feet && !inches && <span>Waiting for data...</span>}
+            {!feet && !inch && <span>Waiting for data...</span>}
             <span style={{ fontSize: "8rem" }}>
               {feet === undefined ? `` : `${feet}'`}
             </span>
             <span style={{ fontSize: "7rem" }}>
-              {inches === undefined ? `` : `${inches}"`}
+              {inch === undefined ? `` : `${inch}"`}
             </span>
           </div>
         </Col>
@@ -165,42 +173,79 @@ const RangePanel = ({
   );
 };
 
+/** main app */
 const App = (props) => {
-  const {
-    defaultView = `home`,
-    defaultSettings = {
-      stimp: 10,
-      slope: 0,
-      surface: 9,
-      offset: 1.5,
-      gateway: 0.5,
-    },
-    defaultStatus = 0,
-  } = props;
-  // home, play, settings
-  const [thisView, setThisView] = useState(defaultView);
-  const [thisSettings, setThisSettings] = useState(defaultSettings);
-  const [thisStatus, setThisStatus] = useState(defaultStatus);
+  const [thisView, setThisView] = useState(VIEWS.HOME);
+
+  const [thisSettings, setThisSettings] = useState({});
+  const [thisSettingsIsLoading, setThisSettingsIsLoading] = useState(true);
+
   const [thisMeasurement, setThisMeasurement] = useState({});
 
   // begin websocket
   const [isConnected, setIsConnected] = useState(socket.connected);
-  const [lastPong, setLastPong] = useState(null);
 
+  const handleUpdateSettings = (keyValuePair) => {
+    setThisSettings({ ...thisSettings, ...keyValuePair });
+  };
+
+  const handleLoadSettings = () => {
+    setThisSettingsIsLoading(true);
+    const url = `${API_ROOT}/settings`;
+    fetch(url)
+      .then((response) => {
+        return response.json();
+      })
+      .then((json) => {
+        setThisSettings(json);
+      })
+      .catch((error) => {
+        notify(error);
+        console.error(error);
+      })
+      .then(() => {
+        // setThisSettingsIsLoading(false);
+      });
+  };
+
+  const handleSaveSettings = () => {
+    setThisSettingsIsLoading(true);
+    const url = `${API_ROOT}/settings`;
+    fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(thisSettings),
+    })
+      .then((response) => response.json())
+      .then((json) => {
+        notify(`Saved settings`);
+        setThisSettings(json);
+      })
+      .catch((error) => {
+        notify(error);
+        console.error(error);
+      })
+      .then(() => {
+        // setThisSettingsIsLoading(false);
+      });
+  };
+
+  /** websocket */
   useEffect(() => {
     socket.on("connect", () => {
       console.debug(`socketio: connect`);
       setIsConnected(true);
     });
 
-    socket.on("disconnect", () => {
+    socket.on(`disconnect`, () => {
       console.debug(`socketio: disconnect`);
       setIsConnected(false);
     });
 
-    socket.on("pong", () => {
+    socket.on(`pong`, () => {
       console.debug(`socketio: pong`);
-      setLastPong(new Date().toISOString());
     });
 
     socket.on(`measurement`, (json) => {
@@ -210,15 +255,15 @@ const App = (props) => {
     });
 
     return () => {
-      socket.off("connect");
-      socket.off("disconnect");
-      socket.off("pong");
+      socket.off(`connect`);
+      socket.off(`disconnect`);
+      socket.off(`pong`);
       socket.off(`measurement`);
     };
   }, []);
 
   const sendPing = () => {
-    socket.emit("ping");
+    socket.emit(`ping`);
   };
 
   const sendReset = () => {
@@ -229,7 +274,6 @@ const App = (props) => {
   window.putt = (value = null) => {
     const raw = value !== null ? value : Math.random() * 3.14;
     const payload = convertRawMeasurement(raw);
-    console.log(payload);
     setThisMeasurement(payload);
     return payload;
   };
@@ -243,16 +287,17 @@ const App = (props) => {
       clearInterval(interval);
     };
   }, []);
-
-  const handleMock = () => {
-    console.log(`mock reading`);
-  };
   // end websocket
 
   useEffect(() => {
-    const value = getLocalStorage(`view`, defaultView);
-    handleChangeView(value);
-    // fetch settings from api
+    let view = getLocalStorage(`view`, thisView);
+    if (!VIEWS.hasOwnProperty(view)) {
+      view = thisView;
+    }
+    handleChangeView(view);
+  }, []);
+
+  useEffect(() => {
     handleLoadSettings();
   }, []);
 
@@ -276,57 +321,24 @@ const App = (props) => {
     }
   };
 
-  const handleChangeStatus = (value) => {
-    console.log(`handing change status`);
-    setThisSettings(value);
-  };
-
-  const handleLoadSettings = (defaults) => {
-    const url = `${API_ROOT}/settings`;
-    console.log(`fetching url: ${url}`);
-    fetch(url)
-      .then((response) => response.json())
-      .then((json) => {
-        setThisSettings(json);
-      })
-      .catch((error) => {
-        console.error(error);
-      });
-  };
-
-  const handleSaveSettings = (payload) => {
-    console.log(payload);
-    const url = `${API_ROOT}/settings`;
-    console.log(`posting url: ${url}`);
-    fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    })
-      .then((response) => response.json())
-      .then((json) => {
-        notify(`Saved settings`);
-        setThisSettings(json);
-      })
-      .catch((error) => {
-        notify(error);
-        console.error(error);
-      });
-  };
-
+  /** convenience functions */
   const notify = (text, type = `info`) => {
     return toast[type](text);
   };
 
+  const navigate = (view) => {
+    if (!VIEWS.hasOwnProperty(view)) {
+      notify(`Invalid view: ${view}`);
+    }
+    handleChangeView(view);
+  };
+
+  /** molecules */
   const HomePage = ({ ...props }) => {
-    const { title, navigate } = props;
+    const { navigate } = props;
 
     return (
       <Container className="h-100">
-        <NavPanel title={title} left={<Info style={{ opacity: "0" }} />} />
-        <hr />
         <blockquote className="mt-4 mb-4">
           For better viewing experience on mobile, tap the{" "}
           <kbd>
@@ -340,7 +352,7 @@ const App = (props) => {
             className="glow"
             size="lg"
             onClick={() => {
-              navigate(`practice`);
+              navigate(VIEWS.PRACTICE);
             }}
           >
             Practice Mode
@@ -350,7 +362,7 @@ const App = (props) => {
             size="lg"
             className="glow"
             onClick={() => {
-              navigate(`drill`);
+              navigate(VIEWS.DRILL);
             }}
             disabled
           >
@@ -361,7 +373,7 @@ const App = (props) => {
             size="lg"
             className="glow"
             onClick={() => {
-              navigate(`drill`);
+              navigate(VIEWS.SESSIONS);
             }}
             disabled
           >
@@ -372,7 +384,7 @@ const App = (props) => {
             size="lg"
             className="glow"
             onClick={() => {
-              navigate(`settings`);
+              navigate(VIEWS.SETTINGS);
             }}
           >
             Settings
@@ -382,122 +394,148 @@ const App = (props) => {
     );
   };
 
-  const PracticePage = ({ ...props }) => {
-    const { title, navigate, status } = props;
-
+  const PracticePage = ({ measurement }) => {
     return (
       <Container className="h-100">
-        <NavPanel
-          title={title}
-          left={
-            <ArrowLeft
-              style={{ cursor: `pointer` }}
-              onClick={() => navigate(`home`)}
-            />
-          }
-        />
-        {/* <StatusPanel value={status} /> */}
-        <DisplayPanel {...thisMeasurement} />
+        <DisplayPanel {...measurement} />
       </Container>
     );
   };
 
   const SettingsPage = ({ ...props }) => {
-    const { title, navigate, onSave = () => {}, defaultValues = {} } = props;
+    const { isLoading, onChange = () => {}, settings = {} } = props;
 
-    const [state, setState] = useState(defaultValues);
-
-    const handleSave = () => {
-      console.log(`handle save`);
-      onSave(state);
-    };
+    const { stimp, slope, surface, offset, gateway } = settings;
 
     return (
       <Container>
-        <NavPanel
-          title={title}
-          left={
-            <ArrowLeft
-              style={{ cursor: `pointer` }}
-              onClick={() => navigate(`home`)}
+        {isLoading ? (
+          <Row className="mt-4">
+            <Col className="text-center">
+              <Spinner animation="border" role="status" />
+            </Col>
+          </Row>
+        ) : (
+          <>
+            <RangePanel
+              title={`Green Speed`}
+              left={`SLOW`}
+              right={`FAST`}
+              min={8}
+              max={12}
+              step={1}
+              defaultValue={stimp}
+              onChange={(val) => onChange({ stimp: val })}
             />
-          }
-          right={<Save style={{ cursor: `pointer` }} onClick={handleSave} />}
-        />
-        <hr />
-        <RangePanel
-          title={`Green Speed`}
-          left={`SLOW`}
-          right={`FAST`}
-          min={8}
-          max={12}
-          step={1}
-          defaultValue={state.stimp}
-          onChange={(val) => setState({ ...state, stimp: val })}
-        />
-        <hr />
-        <RangePanel
-          disabled
-          title={`Green Slope`}
-          left={`DOWNHILL`}
-          right={`UPHILL`}
-          min={-4}
-          max={4}
-          step={1}
-          defaultValue={state.slope}
-          formatValue={(val) =>
-            `${val === 0 ? `` : val > 0 ? `+` : `-`}${Math.abs(val)}º`
-          }
-          onChange={(val) => setState({ ...state, slope: val })}
-        />
-        <hr />
-        <RangePanel
-          title={`Surface Speed`}
-          left={`SLOW`}
-          right={`FAST`}
-          min={8}
-          max={12}
-          step={1}
-          defaultValue={state.surface}
-          onChange={(val) => setState({ ...state, surface: val })}
-        />
-        <hr />
-        <RangePanel
-          title={`Offset Distance`}
-          left={`NEAR`}
-          right={`FAR`}
-          min={0}
-          max={3}
-          step={0.25}
-          defaultValue={state.offset}
-          formatValue={(val) => {
-            const feet = Math.floor(val);
-            const inch = (val - feet) * 12;
-            return `${feet}'${inch}"`;
-          }}
-          onChange={(val) => setState({ ...state, offset: val })}
-        />
-        <hr />
-        <RangePanel
-          disabled
-          title={`Gateway Width`}
-          left={`SHORT`}
-          right={`LONG`}
-          min={0}
-          max={1}
-          step={0.25}
-          defaultValue={state.gateway}
-          formatValue={(val) => {
-            const feet = Math.floor(val);
-            const inch = (val - feet) * 12;
-            return `${feet}'${inch}"`;
-          }}
-          onChange={(val) => setState({ ...state, gateway: val })}
-        />
+            <hr />
+            <RangePanel
+              disabled
+              title={`Green Slope`}
+              left={`DOWNHILL`}
+              right={`UPHILL`}
+              min={-4}
+              max={4}
+              step={1}
+              defaultValue={slope}
+              formatValue={(val) =>
+                `${val === 0 ? `` : val > 0 ? `+` : `-`}${Math.abs(val)}º`
+              }
+              onChange={(val) => onChange({ slope: val })}
+            />
+            <hr />
+            <RangePanel
+              title={`Surface Speed`}
+              left={`SLOW`}
+              right={`FAST`}
+              min={8}
+              max={12}
+              step={1}
+              defaultValue={surface}
+              onChange={(val) => onChange({ surface: val })}
+            />
+            <hr />
+            <RangePanel
+              title={`Offset Distance`}
+              left={`NEAR`}
+              right={`FAR`}
+              min={0}
+              max={3}
+              step={0.25}
+              defaultValue={offset}
+              formatValue={(val) => {
+                const { feet, inch } = convertRawMeasurement(val);
+                return `${feet}'${inch}"`;
+              }}
+              onChange={(val) => onChange({ offset: val })}
+            />
+            <hr />
+            <RangePanel
+              disabled
+              title={`Gateway Width`}
+              left={`SHORT`}
+              right={`LONG`}
+              min={0}
+              max={1}
+              step={0.25}
+              defaultValue={gateway}
+              formatValue={(val) => {
+                const { feet, inch } = convertRawMeasurement(val);
+                return `${feet}'${inch}"`;
+              }}
+              onChange={(val) => onChange({ gateway: val })}
+            />
+          </>
+        )}
       </Container>
     );
   };
 
+  /** presentations */
+  const page = {
+    [VIEWS.HOME]: (
+      <>
+        <NavPanel title={`Home`} left={<Info style={{ opacity: "0" }} />} />
+        <HomePage navigate={navigate} />
+      </>
+    ),
+    [VIEWS.PRACTICE]: (
+      <>
+        <NavPanel
+          title={`Practice`}
+          left={
+            <ArrowLeft
+              style={{ cursor: `pointer` }}
+              onClick={() => navigate(VIEWS.HOME)}
+            />
+          }
+        />
+        <PracticePage measurement={thisMeasurement} />
+      </>
+    ),
+    [VIEWS.SETTINGS]: (
+      <>
+        <NavPanel
+          title={`Settings`}
+          left={
+            <ArrowLeft
+              style={{ cursor: `pointer` }}
+              onClick={() => handleChangeView(VIEWS.HOME)}
+            />
+          }
+          right={
+            <Save style={{ cursor: `pointer` }} onClick={handleSaveSettings} />
+          }
+        />
+        <SettingsPage
+          isLoading={thisSettingsIsLoading}
+          onChange={handleUpdateSettings}
+          settings={thisSettings}
+        />
+      </>
+    ),
+  };
+
+  /** renderer */
   return (
     <Container className="h-100">
       <Row className="h-100 justify-content-center align-items-center">
@@ -525,28 +563,8 @@ const App = (props) => {
             theme="dark"
           />
           <StatusPanel isConnected={isConnected} onReset={sendReset} />
-          {thisView === `home` && (
-            <HomePage
-              title={`Home`}
-              leftNav={null}
-              navigate={handleChangeView}
-            />
-          )}
-          {thisView === `practice` && (
-            <PracticePage
-              title={`Practice`}
-              navigate={handleChangeView}
-              // status={thisStatus}
-            />
-          )}
-          {thisView === `settings` && (
-            <SettingsPage
-              title={`Settings`}
-              navigate={handleChangeView}
-              onSave={handleSaveSettings}
-              defaultValues={thisSettings}
-            />
-          )}
+          {page[thisView]}
+          <pre>{JSON.stringify({ thisMeasurement }, null, 2)}</pre>
         </Col>
       </Row>
     </Container>
