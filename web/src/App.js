@@ -1,6 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { Container, Row, Col } from "react-bootstrap";
-import { Button, Badge, ProgressBar, Spinner } from "react-bootstrap";
+import {
+  Button,
+  Badge,
+  ProgressBar,
+  Spinner,
+  ButtonGroup,
+  Alert,
+} from "react-bootstrap";
 import { ArrowLeft, Save, Info } from "react-feather";
 import { ToastContainer, toast } from "react-toastify";
 import io from "socket.io-client";
@@ -16,6 +23,7 @@ const socket = io(WS_ROOT);
 const VIEWS = {
   HOME: `HOME`,
   PRACTICE: `PRACTICE`,
+  TRAINING: `TRAINING`,
   SETTINGS: `SETTINGS`,
 };
 
@@ -29,6 +37,11 @@ const convertRawMeasurement = (raw) => {
     inch = 0;
   }
   return { raw, feet, inch };
+};
+
+const round = (number, precision) => {
+  const f = 10 ** precision;
+  return Math.round(number * f) / f;
 };
 
 /** components */
@@ -76,25 +89,26 @@ const StatusPanel = ({
   );
 };
 
-const DisplayPanel = ({ raw, feet, inch }) => {
+const DisplayPanel = ({ raw, feet, inch, onClear = () => {} }) => {
+  const hide = raw === undefined || feet === undefined || inch === undefined;
   return (
     <Container className="h-100">
       <Row className="justify-content-center h-100">
-        <Col
-          className="text-center"
-          onClick={() => {
-            console.log(`clear`);
-          }}
-        >
+        <Col className="text-center">
           {/* TODO: toggle decimal & feet/inch */}
-          <div style={{ marginTop: "50%" }}>
-            {!feet && !inch && <span>Waiting for data...</span>}
-            <span style={{ fontSize: "8rem" }}>
-              {feet === undefined ? `` : `${feet}'`}
-            </span>
-            <span style={{ fontSize: "7rem" }}>
-              {inch === undefined ? `` : `${inch}"`}
-            </span>
+          <div style={{ marginTop: "50%" }} onClick={onClear}>
+            {hide ? (
+              <span>Waiting for data...</span>
+            ) : (
+              <>
+                <span style={{ fontSize: "8rem" }}>
+                  {feet === undefined ? `` : `${feet}'`}
+                </span>
+                <span style={{ fontSize: "7rem" }}>
+                  {inch === undefined ? `` : `${inch}"`}
+                </span>
+              </>
+            )}
           </div>
         </Col>
       </Row>
@@ -180,9 +194,10 @@ const App = (props) => {
   const [thisSettings, setThisSettings] = useState({});
   const [thisSettingsIsLoading, setThisSettingsIsLoading] = useState(true);
 
+  // TODO: preferences
+
   const [thisMeasurement, setThisMeasurement] = useState({});
 
-  // begin websocket
   const [isConnected, setIsConnected] = useState(socket.connected);
 
   const handleUpdateSettings = (keyValuePair) => {
@@ -287,7 +302,6 @@ const App = (props) => {
       clearInterval(interval);
     };
   }, []);
-  // end websocket
 
   useEffect(() => {
     let view = getLocalStorage(`view`, thisView);
@@ -319,6 +333,10 @@ const App = (props) => {
       setThisView(value);
       setLocalStorage(`view`, value);
     }
+  };
+
+  const handleResetMeasurement = () => {
+    setThisMeasurement({});
   };
 
   /** convenience functions */
@@ -362,11 +380,10 @@ const App = (props) => {
             size="lg"
             className="glow"
             onClick={() => {
-              navigate(VIEWS.DRILL);
+              navigate(VIEWS.TRAINING);
             }}
-            disabled
           >
-            DECADE® Lag Drill
+            Training Mode
           </Button>
           <Button
             variant="dark"
@@ -398,6 +415,161 @@ const App = (props) => {
     return (
       <Container className="h-100">
         <DisplayPanel {...measurement} />
+      </Container>
+    );
+  };
+
+  const TrainingPage = ({ measurement }) => {
+    // TODO: implement undo
+    const gameStates = [
+      { target: 5, min: 5, max: 5 + 1 },
+      { target: 15, min: 15, max: 15 + 2 },
+      { target: 6, min: 6, max: 6 + 1 },
+      { target: 14, min: 14, max: 14 + 2 },
+      { target: 7, min: 7, max: 7 + 1 },
+      { target: 13, min: 13, max: 13 + 2 },
+      { target: 8, min: 8, max: 8 + 1 },
+      { target: 12, min: 12, max: 12 + 2 },
+      { target: 9, min: 9, max: 9 + 1 },
+      { target: 11, min: 11, max: 11 + 2 },
+      { target: 10, min: 10, max: 10 + 1 },
+      { target: 10, min: 10, max: 10 + 1 },
+      { target: 11, min: 11, max: 11 + 2 },
+      { target: 9, min: 9, max: 9 + 1 },
+      { target: 12, min: 12, max: 12 + 2 },
+      { target: 8, min: 8, max: 8 + 1 },
+      { target: 13, min: 13, max: 13 + 2 },
+      { target: 7, min: 7, max: 7 + 1 },
+      { target: 14, min: 14, max: 14 + 2 },
+      { target: 6, min: 6, max: 6 + 1 },
+      { target: 15, min: 15, max: 15 + 2 },
+      { target: 5, min: 5, max: 5 + 1 },
+    ].slice(0, 4); // TODO: remove slice
+
+    const [gameIndex, setGameIndex] = useState(0);
+    const [gameIsDone, setGameIsDone] = useState(false);
+    const [gameScore, setGameScore] = useState(0);
+    const [gameReward, setGameReward] = useState(100 / gameStates.length);
+    const [gameMeasurement, setGameMeasurement] = useState(measurement);
+
+    /** big TODO's:
+     * implement display reset
+     * add display unit toggle
+     * add info banner to display
+     * auto-clear reset with preference enable/disable
+     * lift state to main app */
+    useEffect(() => {
+      console.log(`receive measurement`);
+      handleAction(measurement);
+    }, gameMeasurement);
+
+    const reset = () => {
+      // init, reset
+      setGameIsDone(false);
+      setGameReward(100 / gameStates.length);
+      setGameIndex(0);
+      setGameScore(0);
+      // reset sensor reading
+    };
+
+    const evaluate = (state, action) => {
+      const { min, max } = state;
+      const ok = min <= action && action <= max;
+      return ok;
+    };
+
+    const handleNext = () => {
+      const nextIndex = gameIndex + 1;
+      if (nextIndex === gameStates.length) {
+        setGameIsDone(true);
+      } else {
+        setGameIndex(nextIndex);
+        setGameReward(100 / gameStates.length);
+      }
+    };
+
+    const handleAction = (value) => {
+      // TODO: value should be object
+      const { raw } = value;
+      console.log(`handle action: ${raw}`);
+      const advance = evaluate(gameStates[gameIndex], raw);
+      if (advance) {
+        setGameScore(gameScore + gameReward);
+        handleNext();
+      } else {
+        // halve potential reward, allow retry
+        setGameReward(gameReward / 2);
+      }
+    };
+
+    const gameState = gameStates[gameIndex];
+    const gameProgress = gameIsDone
+      ? 100
+      : (gameIndex / gameStates.length) * 100;
+
+    return (
+      <Container>
+        <Row>
+          <Col>
+            <ProgressBar
+              className="mt-2"
+              striped
+              variant="dark"
+              now={gameProgress}
+              label={`${round(gameProgress, 0)}%`}
+            />
+            <Row className="text-center my-3">
+              <Col>
+                <ButtonGroup size="med">
+                  <Button disabled={true} variant="dark">
+                    Undo
+                  </Button>
+                  <Button
+                    disabled={false}
+                    variant="warning"
+                    onClick={() => handleAction({ raw: gameState.min - 1 })}
+                  >{`< ${gameState.min}'`}</Button>
+                  <Button
+                    disabled={false}
+                    variant="success"
+                    onClick={() => handleAction({ raw: gameState.target })}
+                  >
+                    <strong>{`${gameState.target}'`}</strong>
+                  </Button>
+                  <Button
+                    disabled={false}
+                    variant="danger"
+                    onClick={() => handleAction({ raw: gameState.max + 1 })}
+                  >{`> ${gameState.max}'`}</Button>
+                  <Button variant="dark" onClick={reset}>
+                    Reset
+                  </Button>
+                </ButtonGroup>
+              </Col>
+            </Row>
+            {gameIsDone ? (
+              <span>{`Your Score: ${round(gameScore, 1)}%`}</span>
+            ) : (
+              <DisplayPanel
+                {...{ ...measurement, onClear: handleResetMeasurement }}
+              />
+            )}
+            {/* <pre>
+              {JSON.stringify(
+                {
+                  turn: `${gameIndex + 1}/${gameStates.length}`,
+                  gameIndex,
+                  gameIsDone,
+                  gameScore,
+                  gameReward,
+                  currentValue: gameStates[gameIndex],
+                },
+                null,
+                2
+              )}
+            </pre> */}
+          </Col>
+        </Row>
       </Container>
     );
   };
@@ -512,6 +684,20 @@ const App = (props) => {
         <PracticePage measurement={thisMeasurement} />
       </>
     ),
+    [VIEWS.TRAINING]: (
+      <>
+        <NavPanel
+          title={`Training`}
+          left={
+            <ArrowLeft
+              style={{ cursor: `pointer` }}
+              onClick={() => navigate(VIEWS.HOME)}
+            />
+          }
+        />
+        <TrainingPage measurement={thisMeasurement} />
+      </>
+    ),
     [VIEWS.SETTINGS]: (
       <>
         <NavPanel
@@ -519,7 +705,7 @@ const App = (props) => {
           left={
             <ArrowLeft
               style={{ cursor: `pointer` }}
-              onClick={() => handleChangeView(VIEWS.HOME)}
+              onClick={() => navigate(VIEWS.HOME)}
             />
           }
           right={
@@ -564,7 +750,6 @@ const App = (props) => {
           />
           <StatusPanel isConnected={isConnected} onReset={sendReset} />
           {page[thisView]}
-          <pre>{JSON.stringify({ thisMeasurement }, null, 2)}</pre>
         </Col>
       </Row>
     </Container>
