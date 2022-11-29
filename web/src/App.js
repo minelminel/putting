@@ -6,7 +6,7 @@ import {
   ProgressBar,
   Spinner,
   ButtonGroup,
-  Alert,
+  Form,
 } from "react-bootstrap";
 import { ArrowLeft, Save, Info } from "react-feather";
 import { ToastContainer, toast } from "react-toastify";
@@ -27,8 +27,34 @@ const VIEWS = {
   SETTINGS: `SETTINGS`,
 };
 
+const gameStates = [
+  { target: 5, min: 5, max: 5 + 1 },
+  { target: 15, min: 15, max: 15 + 2 },
+  { target: 6, min: 6, max: 6 + 1 },
+  { target: 14, min: 14, max: 14 + 2 },
+  { target: 7, min: 7, max: 7 + 1 },
+  { target: 13, min: 13, max: 13 + 2 },
+  { target: 8, min: 8, max: 8 + 1 },
+  { target: 12, min: 12, max: 12 + 2 },
+  { target: 9, min: 9, max: 9 + 1 },
+  { target: 11, min: 11, max: 11 + 2 },
+  { target: 10, min: 10, max: 10 + 1 },
+  { target: 10, min: 10, max: 10 + 1 },
+  { target: 11, min: 11, max: 11 + 2 },
+  { target: 9, min: 9, max: 9 + 1 },
+  { target: 12, min: 12, max: 12 + 2 },
+  { target: 8, min: 8, max: 8 + 1 },
+  { target: 13, min: 13, max: 13 + 2 },
+  { target: 7, min: 7, max: 7 + 1 },
+  { target: 14, min: 14, max: 14 + 2 },
+  { target: 6, min: 6, max: 6 + 1 },
+  { target: 15, min: 15, max: 15 + 2 },
+  { target: 5, min: 5, max: 5 + 1 },
+].slice(0, 4); // TODO: remove slice
+
 /** utils */
 const convertRawMeasurement = (raw) => {
+  const meter = raw * 0.3048;
   let feet, inch;
   feet = Math.floor(raw);
   inch = Math.round((raw - feet) * 12);
@@ -36,7 +62,7 @@ const convertRawMeasurement = (raw) => {
     feet += 1;
     inch = 0;
   }
-  return { raw, feet, inch };
+  return { raw, feet, inch, meter };
 };
 
 const round = (number, precision) => {
@@ -89,17 +115,18 @@ const StatusPanel = ({
   );
 };
 
-const DisplayPanel = ({ raw, feet, inch, onClear = () => {} }) => {
-  const hide = raw === undefined || feet === undefined || inch === undefined;
+const DisplayPanel = ({ raw, units, onClear = () => {} }) => {
+  const hide = raw === undefined;
+  const { feet, inch, meter } = convertRawMeasurement(raw);
+
   return (
     <Container className="h-100">
       <Row className="justify-content-center h-100">
         <Col className="text-center">
-          {/* TODO: toggle decimal & feet/inch */}
           <div style={{ marginTop: "50%" }} onClick={onClear}>
             {hide ? (
               <span>Waiting for data...</span>
-            ) : (
+            ) : units === `imperial` ? (
               <>
                 <span style={{ fontSize: "8rem" }}>
                   {feet === undefined ? `` : `${feet}'`}
@@ -108,6 +135,14 @@ const DisplayPanel = ({ raw, feet, inch, onClear = () => {} }) => {
                   {inch === undefined ? `` : `${inch}"`}
                 </span>
               </>
+            ) : units === `metric` ? (
+              <span style={{ fontSize: "8rem" }}>
+                {meter === undefined ? `` : `${round(meter, 2)}m`}
+              </span>
+            ) : (
+              <span style={{ fontSize: "8rem" }}>
+                {meter === undefined ? `` : `${round(raw, 1)}ft`}
+              </span>
             )}
           </div>
         </Col>
@@ -189,22 +224,38 @@ const RangePanel = ({
 
 /** main app */
 const App = (props) => {
+  const potentialReward = 100 / gameStates.length;
+
   const [thisView, setThisView] = useState(VIEWS.HOME);
 
   const [thisSettings, setThisSettings] = useState({});
   const [thisSettingsIsLoading, setThisSettingsIsLoading] = useState(true);
 
-  // TODO: preferences
+  const [trainingIndex, setTrainingIndex] = useState(0);
+  const [trainingIsDone, setTrainingIsDone] = useState(false);
+  const [trainingReward, setTrainingReward] = useState(potentialReward);
+  const [trainingScore, setTrainingScore] = useState(0);
 
-  const [thisMeasurement, setThisMeasurement] = useState({});
+  const [thisMeasurement, setThisMeasurement] = useState(null);
 
   const [isConnected, setIsConnected] = useState(socket.connected);
 
+  const handleMeasurement = (m) => {
+    setThisMeasurement(m);
+    if (!m) {
+      return;
+    }
+    // do something with game...
+    handleTraining(m);
+  };
+
   const handleUpdateSettings = (keyValuePair) => {
+    console.log(`handle update settings`);
     setThisSettings({ ...thisSettings, ...keyValuePair });
   };
 
   const handleLoadSettings = () => {
+    console.log(`handle load settings`);
     setThisSettingsIsLoading(true);
     const url = `${API_ROOT}/settings`;
     fetch(url)
@@ -219,11 +270,12 @@ const App = (props) => {
         console.error(error);
       })
       .then(() => {
-        // setThisSettingsIsLoading(false);
+        setThisSettingsIsLoading(false);
       });
   };
 
   const handleSaveSettings = () => {
+    console.log(`handle save settings`);
     setThisSettingsIsLoading(true);
     const url = `${API_ROOT}/settings`;
     fetch(url, {
@@ -243,8 +295,39 @@ const App = (props) => {
         console.error(error);
       })
       .then(() => {
-        // setThisSettingsIsLoading(false);
+        setThisSettingsIsLoading(false);
       });
+  };
+
+  const handleTraining = (m) => {
+    const { raw } = m;
+    const { min, max } = gameStates[trainingIndex];
+    if (min <= raw && raw <= max) {
+      // advance to next turn
+      console.log(`training attempt passed, advance turn`);
+      setTrainingScore(trainingScore + trainingReward);
+      const nextIndex = trainingIndex + 1;
+      if (nextIndex === gameStates.length) {
+        // finished
+        setTrainingIsDone(true);
+      } else {
+        // more turns
+        setTrainingIndex(nextIndex);
+        setTrainingReward(potentialReward);
+      }
+    } else {
+      // allow another attempt
+      console.log(`training attempt failed, retry turn`);
+      setTrainingReward(trainingReward / 2);
+    }
+  };
+
+  const handleResetTraining = () => {
+    handleResetMeasurement();
+    setTrainingIndex(0);
+    setTrainingIsDone(false);
+    setTrainingReward(potentialReward);
+    setTrainingScore(0);
   };
 
   /** websocket */
@@ -266,7 +349,7 @@ const App = (props) => {
     socket.on(`measurement`, (json) => {
       console.log(`socketio: measurement`);
       const payload = JSON.parse(json);
-      setThisMeasurement(payload);
+      handleMeasurement(payload);
     });
 
     return () => {
@@ -275,7 +358,7 @@ const App = (props) => {
       socket.off(`pong`);
       socket.off(`measurement`);
     };
-  }, []);
+  });
 
   const sendPing = () => {
     socket.emit(`ping`);
@@ -289,12 +372,13 @@ const App = (props) => {
   window.putt = (value = null) => {
     const raw = value !== null ? value : Math.random() * 3.14;
     const payload = convertRawMeasurement(raw);
-    setThisMeasurement(payload);
+    handleMeasurement(payload);
     return payload;
   };
 
   // keep socket refreshed for more responsive display
   useEffect(() => {
+    console.log(`useEffect: ping`);
     const interval = setInterval(() => {
       sendPing();
     }, 500);
@@ -304,14 +388,16 @@ const App = (props) => {
   }, []);
 
   useEffect(() => {
+    console.log(`useEffect: view`);
     let view = getLocalStorage(`view`, thisView);
     if (!VIEWS.hasOwnProperty(view)) {
       view = thisView;
     }
     handleChangeView(view);
-  }, []);
+  });
 
   useEffect(() => {
+    console.log(`useEffect: settings`);
     handleLoadSettings();
   }, []);
 
@@ -336,7 +422,7 @@ const App = (props) => {
   };
 
   const handleResetMeasurement = () => {
-    setThisMeasurement({});
+    handleMeasurement(null);
   };
 
   /** convenience functions */
@@ -411,101 +497,23 @@ const App = (props) => {
     );
   };
 
-  const PracticePage = ({ measurement }) => {
+  const PracticePage = ({ measurement, onClear }) => {
     return (
       <Container className="h-100">
-        <DisplayPanel {...measurement} />
+        <DisplayPanel
+          {...{ ...measurement, onClear, units: thisSettings.units }}
+        />
       </Container>
     );
   };
 
-  const TrainingPage = ({ measurement }) => {
+  const TrainingPage = ({ ...props }) => {
     // TODO: implement undo
-    const gameStates = [
-      { target: 5, min: 5, max: 5 + 1 },
-      { target: 15, min: 15, max: 15 + 2 },
-      { target: 6, min: 6, max: 6 + 1 },
-      { target: 14, min: 14, max: 14 + 2 },
-      { target: 7, min: 7, max: 7 + 1 },
-      { target: 13, min: 13, max: 13 + 2 },
-      { target: 8, min: 8, max: 8 + 1 },
-      { target: 12, min: 12, max: 12 + 2 },
-      { target: 9, min: 9, max: 9 + 1 },
-      { target: 11, min: 11, max: 11 + 2 },
-      { target: 10, min: 10, max: 10 + 1 },
-      { target: 10, min: 10, max: 10 + 1 },
-      { target: 11, min: 11, max: 11 + 2 },
-      { target: 9, min: 9, max: 9 + 1 },
-      { target: 12, min: 12, max: 12 + 2 },
-      { target: 8, min: 8, max: 8 + 1 },
-      { target: 13, min: 13, max: 13 + 2 },
-      { target: 7, min: 7, max: 7 + 1 },
-      { target: 14, min: 14, max: 14 + 2 },
-      { target: 6, min: 6, max: 6 + 1 },
-      { target: 15, min: 15, max: 15 + 2 },
-      { target: 5, min: 5, max: 5 + 1 },
-    ].slice(0, 4); // TODO: remove slice
+    const { index, done, score, measurement, onReset, onClear, onMeasurement } =
+      props;
 
-    const [gameIndex, setGameIndex] = useState(0);
-    const [gameIsDone, setGameIsDone] = useState(false);
-    const [gameScore, setGameScore] = useState(0);
-    const [gameReward, setGameReward] = useState(100 / gameStates.length);
-    const [gameMeasurement, setGameMeasurement] = useState(measurement);
-
-    /** big TODO's:
-     * implement display reset
-     * add display unit toggle
-     * add info banner to display
-     * auto-clear reset with preference enable/disable
-     * lift state to main app */
-    useEffect(() => {
-      console.log(`receive measurement`);
-      handleAction(measurement);
-    }, gameMeasurement);
-
-    const reset = () => {
-      // init, reset
-      setGameIsDone(false);
-      setGameReward(100 / gameStates.length);
-      setGameIndex(0);
-      setGameScore(0);
-      // reset sensor reading
-    };
-
-    const evaluate = (state, action) => {
-      const { min, max } = state;
-      const ok = min <= action && action <= max;
-      return ok;
-    };
-
-    const handleNext = () => {
-      const nextIndex = gameIndex + 1;
-      if (nextIndex === gameStates.length) {
-        setGameIsDone(true);
-      } else {
-        setGameIndex(nextIndex);
-        setGameReward(100 / gameStates.length);
-      }
-    };
-
-    const handleAction = (value) => {
-      // TODO: value should be object
-      const { raw } = value;
-      console.log(`handle action: ${raw}`);
-      const advance = evaluate(gameStates[gameIndex], raw);
-      if (advance) {
-        setGameScore(gameScore + gameReward);
-        handleNext();
-      } else {
-        // halve potential reward, allow retry
-        setGameReward(gameReward / 2);
-      }
-    };
-
-    const gameState = gameStates[gameIndex];
-    const gameProgress = gameIsDone
-      ? 100
-      : (gameIndex / gameStates.length) * 100;
+    const { min, max, target } = gameStates[index];
+    const progress = done ? 100 : (index / gameStates.length) * 100;
 
     return (
       <Container>
@@ -515,59 +523,43 @@ const App = (props) => {
               className="mt-2"
               striped
               variant="dark"
-              now={gameProgress}
-              label={`${round(gameProgress, 0)}%`}
+              now={progress}
+              label={`${round(progress, 0)}%`}
             />
             <Row className="text-center my-3">
               <Col>
-                <ButtonGroup size="med">
-                  <Button disabled={true} variant="dark">
-                    Undo
-                  </Button>
+                <Button disabled={true} variant="dark">
+                  Undo
+                </Button>
+                <ButtonGroup size="med" className="mx-3">
                   <Button
                     disabled={false}
                     variant="warning"
-                    onClick={() => handleAction({ raw: gameState.min - 1 })}
-                  >{`< ${gameState.min}'`}</Button>
+                    onClick={() => onMeasurement({ raw: min - 1 })}
+                  >{`< ${min}'`}</Button>
                   <Button
                     disabled={false}
                     variant="success"
-                    onClick={() => handleAction({ raw: gameState.target })}
+                    onClick={() => onMeasurement({ raw: target })}
                   >
-                    <strong>{`${gameState.target}'`}</strong>
+                    <strong>{`${target}'`}</strong>
                   </Button>
                   <Button
                     disabled={false}
                     variant="danger"
-                    onClick={() => handleAction({ raw: gameState.max + 1 })}
-                  >{`> ${gameState.max}'`}</Button>
-                  <Button variant="dark" onClick={reset}>
-                    Reset
-                  </Button>
+                    onClick={() => onMeasurement({ raw: max + 1 })}
+                  >{`> ${max}'`}</Button>
                 </ButtonGroup>
+                <Button variant="dark" onClick={onReset}>
+                  Reset
+                </Button>
               </Col>
             </Row>
-            {gameIsDone ? (
-              <span>{`Your Score: ${round(gameScore, 1)}%`}</span>
+            {done ? (
+              <span>{`Your Score: ${round(score, 1)}%`}</span>
             ) : (
-              <DisplayPanel
-                {...{ ...measurement, onClear: handleResetMeasurement }}
-              />
+              <DisplayPanel {...{ ...measurement, onClear }} />
             )}
-            {/* <pre>
-              {JSON.stringify(
-                {
-                  turn: `${gameIndex + 1}/${gameStates.length}`,
-                  gameIndex,
-                  gameIsDone,
-                  gameScore,
-                  gameReward,
-                  currentValue: gameStates[gameIndex],
-                },
-                null,
-                2
-              )}
-            </pre> */}
           </Col>
         </Row>
       </Container>
@@ -577,7 +569,16 @@ const App = (props) => {
   const SettingsPage = ({ ...props }) => {
     const { isLoading, onChange = () => {}, settings = {} } = props;
 
-    const { stimp, slope, surface, offset, gateway } = settings;
+    const {
+      stimp,
+      slope,
+      surface,
+      offset,
+      gateway,
+      units,
+      autoclear,
+      duration,
+    } = settings;
 
     return (
       <Container>
@@ -589,6 +590,63 @@ const App = (props) => {
           </Row>
         ) : (
           <>
+            <hr />
+            <Form>
+              <Form.Label>Display Units</Form.Label>
+              <div key={`inline-radio`} className="mb-3">
+                <Form.Check
+                  defaultChecked={units === `decimal`}
+                  inline
+                  label="ft"
+                  type="radio"
+                  onChange={(e) => {
+                    onChange({ units: `decimal` });
+                  }}
+                />
+                <Form.Check
+                  defaultChecked={units === `imperial`}
+                  inline
+                  label="ft/in"
+                  type="radio"
+                  onChange={(e) => {
+                    onChange({ units: `imperial` });
+                  }}
+                />
+                <Form.Check
+                  defaultChecked={units === `metric`}
+                  inline
+                  label="m"
+                  type="radio"
+                  onChange={(e) => {
+                    onChange({ units: `metric` });
+                  }}
+                />
+              </div>
+              <hr />
+              <Form.Check
+                defaultChecked={autoclear}
+                type="switch"
+                id="custom-switch"
+                label="Automatically clear display"
+                onChange={(e) => {
+                  onChange({ autoclear: e.target.checked });
+                }}
+              />
+              <hr />
+              <>
+                <Form.Label>Display Duration: {`${duration}s`}</Form.Label>
+                <Form.Range
+                  min={1}
+                  max={10}
+                  step={1}
+                  value={duration}
+                  onChange={(e) => {
+                    onChange({ duration: parseInt(e.target.value) });
+                  }}
+                />
+              </>
+            </Form>
+            <hr />
             <RangePanel
               title={`Green Speed`}
               left={`SLOW`}
@@ -681,7 +739,10 @@ const App = (props) => {
             />
           }
         />
-        <PracticePage measurement={thisMeasurement} />
+        <PracticePage
+          measurement={thisMeasurement}
+          onClear={handleResetMeasurement}
+        />
       </>
     ),
     [VIEWS.TRAINING]: (
@@ -695,7 +756,15 @@ const App = (props) => {
             />
           }
         />
-        <TrainingPage measurement={thisMeasurement} />
+        <TrainingPage
+          index={trainingIndex}
+          done={trainingIsDone}
+          score={trainingScore}
+          measurement={thisMeasurement}
+          onMeasurement={handleMeasurement}
+          onClear={handleResetMeasurement}
+          onReset={handleResetTraining}
+        />
       </>
     ),
     [VIEWS.SETTINGS]: (
@@ -750,6 +819,7 @@ const App = (props) => {
           />
           <StatusPanel isConnected={isConnected} onReset={sendReset} />
           {page[thisView]}
+          {/* <pre>{JSON.stringify({ thisMeasurement }, null, 2)}</pre> */}
         </Col>
       </Row>
     </Container>
